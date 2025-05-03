@@ -1,0 +1,82 @@
+import matplotlib.pyplot as plt
+import yfinance as yf
+import pandas as pd
+
+# Hent data fra Yahoo Finance
+df = yf.download("AAPL", period="5y", interval="1d", auto_adjust=True)
+
+# Beregning af glidende gennemsnit
+df["EMA_50"] = df["Close"].ewm(span=50, adjust=False).mean()
+df["EMA_200"] = df["Close"].ewm(span=200, adjust=False).mean()
+
+# Købs- og salgssignaler baseret på EMA-kryds
+df["EMA_Signal"] = 0
+df.loc[df["EMA_50"] > df["EMA_200"], "EMA_Signal"] = 1  # Købssignal
+df.loc[df["EMA_50"] < df["EMA_200"], "EMA_Signal"] = -1  # Salgssignal
+
+# Find EMA-baserede krydspunkter
+df["Buy_Signal_EMA"] = (df["EMA_Signal"].shift(1) == -1) & (df["EMA_Signal"] == 1)
+df["Sell_Signal_EMA"] = (df["EMA_Signal"].shift(1) == 1) & (df["EMA_Signal"] == -1)
+
+# Beregn MACD-indikatoren
+df["MACD"] = df["Close"].ewm(span=12, adjust=False).mean() - df["Close"].ewm(span=26, adjust=False).mean()
+df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
+
+# Beregn RSI-indikatoren
+delta = df["Close"].diff()
+gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+rs = gain / loss
+df["RSI"] = 100 - (100 / (1 + rs))
+
+# **Opdateret handelsstrategi for MACD + RSI**
+
+# Købssignal: Positiv MACD og RSI mellem 40 og 60 + EMA crossover
+df["Buy_Signal_MACD_RSI"] = (df["MACD"] > 0) & (df["RSI"] > 40) & (df["RSI"] < 60) & (df["EMA_Signal"] == 1)
+
+# Salgssignal: Negativ MACD og RSI over 70 eller under 30 + EMA crossover
+df["Sell_Signal_MACD_RSI"] = (df["MACD"] < 0) & ((df["RSI"] > 70) | (df["RSI"] < 30)) & (df["EMA_Signal"] == -1)
+
+
+# Visualisering med tre grafer
+fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True, gridspec_kw={'height_ratios': [2, 1, 1]})
+
+# Prisgraf med EMA og køb/salgssignaler
+axes[0].plot(df.index, df["Close"], label="Kurs", color="black", alpha=0.7)
+axes[0].plot(df.index, df["EMA_50"], label="50-dages EMA", color="blue", linestyle="dashed")
+axes[0].plot(df.index, df["EMA_200"], label="200-dages EMA", color="red", linestyle="dashed")
+
+
+# MACD+RSI køb/salgssignaler (grøn/rød)
+axes[0].scatter(df.index[df["Buy_Signal_MACD_RSI"]], df["Close"][df["Buy_Signal_MACD_RSI"]], marker="^", color="green", label="Købssignal", alpha=1)
+axes[0].scatter(df.index[df["Sell_Signal_MACD_RSI"]], df["Close"][df["Sell_Signal_MACD_RSI"]], marker="v", color="red", label="Salgssignal", alpha=1)
+
+axes[0].set_title("Investeringstrategi med EMA & MACD+RSI")
+axes[0].legend()
+axes[0].grid()
+
+# MACD-graf
+axes[1].plot(df.index, df["MACD"], label="MACD", color="blue")
+axes[1].plot(df.index, df["MACD_Signal"], label="MACD Signal", color="red", linestyle="dashed")
+axes[1].bar(df.index, df["MACD"] - df["MACD_Signal"], color=['green' if v >= 0 else 'red' for v in (df["MACD"] - df["MACD_Signal"])], alpha=0.5)
+axes[1].axhline(0, color="gray", linewidth=0.5)
+axes[1].set_title("MACD-indikator")
+axes[1].legend()
+axes[1].grid()
+
+# RSI-graf
+axes[2].plot(df.index, df["RSI"], label="RSI", color="purple")
+axes[2].axhline(70, color="red", linestyle="dashed", label="Overkøbt (70)")
+axes[2].axhline(30, color="green", linestyle="dashed", label="Oversolgt (30)")
+
+
+axes[2].set_title("Relative Strength Index (RSI)")
+axes[2].legend()
+axes[2].grid()
+
+# Fælles x-label
+plt.xlabel("Dato")
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
